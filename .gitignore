@@ -112,3 +112,12 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# 数据集
+data/
+
+# Vscode配置
+.vscode/
+
+# 本地训练日志
+log/sem_seg_local/

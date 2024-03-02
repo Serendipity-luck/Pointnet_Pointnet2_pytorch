@@ -8,6 +8,7 @@ import torch.nn.functional as F
 
 
 class STN3d(nn.Module):
+    """学习一个仿射变换矩阵"""
     def __init__(self, channel):
         super(STN3d, self).__init__()
         self.conv1 = torch.nn.Conv1d(channel, 64, 1)
@@ -37,7 +38,7 @@ class STN3d(nn.Module):
         x = self.fc3(x)
 
         iden = Variable(torch.from_numpy(np.array([1, 0, 0, 0, 1, 0, 0, 0, 1]).astype(np.float32))).view(1, 9).repeat(
-            batchsize, 1)
+            batchsize, 1) # 单位矩阵 shape (batch_size, 9)
         if x.is_cuda:
             iden = iden.cuda()
         x = x + iden
@@ -102,7 +103,7 @@ class PointNetEncoder(nn.Module):
 
     def forward(self, x):
         B, D, N = x.size()
-        trans = self.stn(x)
+        trans = self.stn(x) # 学习仿射变换矩阵
         x = x.transpose(2, 1)
         if D > 3:
             feature = x[:, :, 3:]
@@ -114,7 +115,7 @@ class PointNetEncoder(nn.Module):
         x = F.relu(self.bn1(self.conv1(x)))
 
         if self.feature_transform:
-            trans_feat = self.fstn(x)
+            trans_feat = self.fstn(x) # 特征变换矩阵
             x = x.transpose(2, 1)
             x = torch.bmm(x, trans_feat)
             x = x.transpose(2, 1)
@@ -124,11 +125,13 @@ class PointNetEncoder(nn.Module):
         pointfeat = x
         x = F.relu(self.bn2(self.conv2(x)))
         x = self.bn3(self.conv3(x))
-        x = torch.max(x, 2, keepdim=True)[0]
+        x = torch.max(x, 2, keepdim=True)[0] # maxpool (batch_size, num_feature, 1)
         x = x.view(-1, 1024)
         if self.global_feat:
+            # 分类任务只用全局特征
             return x, trans, trans_feat
         else:
+            # 语义分割任务还需要局部特征(pointfeat)，拼接
             x = x.view(-1, 1024, 1).repeat(1, 1, N)
             return torch.cat([x, pointfeat], 1), trans, trans_feat
 

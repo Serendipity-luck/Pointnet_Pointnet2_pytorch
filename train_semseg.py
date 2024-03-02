@@ -30,6 +30,9 @@ for i, cat in enumerate(seg_classes.keys()):
     seg_label_to_cat[i] = cat
 
 def inplace_relu(m):
+    """
+    对于relu层，直接修改数据，而不创建新数据，节省内存
+    """
     classname = m.__class__.__name__
     if classname.find('ReLU') != -1:
         m.inplace=True
@@ -64,7 +67,7 @@ def main(args):
     timestr = str(datetime.datetime.now().strftime('%Y-%m-%d_%H-%M'))
     experiment_dir = Path('./log/')
     experiment_dir.mkdir(exist_ok=True)
-    experiment_dir = experiment_dir.joinpath('sem_seg')
+    experiment_dir = experiment_dir.joinpath('sem_seg_local')
     experiment_dir.mkdir(exist_ok=True)
     if args.log_dir is None:
         experiment_dir = experiment_dir.joinpath(timestr)
@@ -89,8 +92,8 @@ def main(args):
     log_string(args)
 
     root = 'data/stanford_indoor3d/'
-    NUM_CLASSES = 13
-    NUM_POINT = args.npoint
+    NUM_CLASSES = 13 # 类别数
+    NUM_POINT = args.npoint # 暂时不知道作用
     BATCH_SIZE = args.batch_size
 
     print("start loading training data ...")
@@ -148,10 +151,13 @@ def main(args):
         optimizer = torch.optim.SGD(classifier.parameters(), lr=args.learning_rate, momentum=0.9)
 
     def bn_momentum_adjust(m, momentum):
+        """
+        调整BN层momentum
+        """
         if isinstance(m, torch.nn.BatchNorm2d) or isinstance(m, torch.nn.BatchNorm1d):
             m.momentum = momentum
 
-    LEARNING_RATE_CLIP = 1e-5
+    LEARNING_RATE_CLIP = 1e-5 # 学习率裁剪（下限）
     MOMENTUM_ORIGINAL = 0.1
     MOMENTUM_DECCAY = 0.5
     MOMENTUM_DECCAY_STEP = args.step_size
@@ -178,16 +184,17 @@ def main(args):
         classifier = classifier.train()
 
         for i, (points, target) in tqdm(enumerate(trainDataLoader), total=len(trainDataLoader), smoothing=0.9):
+            # points: (N, 9)
             optimizer.zero_grad()
 
             points = points.data.numpy()
-            points[:, :, :3] = provider.rotate_point_cloud_z(points[:, :, :3])
+            points[:, :, :3] = provider.rotate_point_cloud_z(points[:, :, :3]) # 点云沿z轴随机旋转，增强数据
             points = torch.Tensor(points)
             points, target = points.float().cuda(), target.long().cuda()
-            points = points.transpose(2, 1)
+            points = points.transpose(2, 1) # shape (batch_size, 9, num_points)
 
-            seg_pred, trans_feat = classifier(points)
-            seg_pred = seg_pred.contiguous().view(-1, NUM_CLASSES)
+            seg_pred, trans_feat = classifier(points) # trans_feat T-Net输出的特征变换矩阵 shape(batch_size, k, k)
+            seg_pred = seg_pred.contiguous().view(-1, NUM_CLASSES) # 展平统计
 
             batch_label = target.view(-1, 1)[:, 0].cpu().data.numpy()
             target = target.view(-1, 1)[:, 0]
@@ -195,6 +202,7 @@ def main(args):
             loss.backward()
             optimizer.step()
 
+            # 统计
             pred_choice = seg_pred.cpu().data.max(1)[1].numpy()
             correct = np.sum(pred_choice == batch_label)
             total_correct += correct
@@ -203,6 +211,7 @@ def main(args):
         log_string('Training mean loss: %f' % (loss_sum / num_batches))
         log_string('Training accuracy: %f' % (total_correct / float(total_seen)))
 
+        # checkpoint
         if epoch % 5 == 0:
             logger.info('Save model...')
             savepath = str(checkpoints_dir) + '/model.pth'
@@ -272,6 +281,7 @@ def main(args):
             log_string('Eval mean loss: %f' % (loss_sum / num_batches))
             log_string('Eval accuracy: %f' % (total_correct / float(total_seen)))
 
+            # 保存最好模型
             if mIoU >= best_iou:
                 best_iou = mIoU
                 logger.info('Save model...')

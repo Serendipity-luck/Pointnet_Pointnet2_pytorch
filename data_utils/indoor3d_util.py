@@ -3,8 +3,8 @@ import glob
 import os
 import sys
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ROOT_DIR = os.path.dirname(BASE_DIR)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__)) # 当前目录（data_utils）
+ROOT_DIR = os.path.dirname(BASE_DIR) # 项目根目录
 sys.path.append(BASE_DIR)
 
 DATA_PATH = os.path.join(ROOT_DIR, 'data','s3dis', 'Stanford3dDataset_v1.2_Aligned_Version')
@@ -45,19 +45,20 @@ def collect_point_label(anno_path, out_filename, file_format='txt'):
         the points are shifted before save, the most negative point is now at origin.
     """
     points_list = []
-    for f in glob.glob(os.path.join(anno_path, '*.txt')):
+    for f in glob.glob(os.path.join(anno_path, '*.txt')): # 列出指定目录下所有txt文件
         cls = os.path.basename(f).split('_')[0]
         print(f)
         if cls not in g_classes: # note: in some room there is 'staris' class..
             cls = 'clutter'
 
-        points = np.loadtxt(f)
-        labels = np.ones((points.shape[0],1)) * g_class2label[cls]
-        points_list.append(np.concatenate([points, labels], 1)) # Nx7
+        points = np.loadtxt(f) # (N, 6[XYZRGB])
+        labels = np.ones((points.shape[0],1)) * g_class2label[cls] # 为文件中的每个点生成标签
+        points_list.append(np.concatenate([points, labels], 1)) # (N, 7(XYZRGBL))
     
-    data_label = np.concatenate(points_list, 0)
-    xyz_min = np.amin(data_label, axis=0)[0:3]
-    data_label[:, 0:3] -= xyz_min
+    # 将一个房间中所有物体的点都于标签关联后，放到一起
+    data_label = np.concatenate(points_list, 0) # (N * M, 7)
+    xyz_min = np.amin(data_label, axis=0)[0:3] # 所有点坐标的最小值
+    data_label[:, 0:3] -= xyz_min # 将坐标最小的点移动到原点，因为我们只关心点之间的相对关系，而不关心绝对坐标
     
     if file_format=='txt':
         fout = open(out_filename, 'w')
