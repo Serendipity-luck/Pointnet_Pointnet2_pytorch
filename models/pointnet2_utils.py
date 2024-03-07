@@ -200,12 +200,12 @@ class PointNetSetAbstraction(nn.Module):
             new_xyz, new_points = sample_and_group(self.npoint, self.radius, self.nsample, xyz, points)
         # new_xyz: sampled points position data, [B, npoint, C]
         # new_points: sampled points data, [B, npoint, nsample, C+D]
-        new_points = new_points.permute(0, 3, 2, 1) # [B, C+D, nsample,npoint]
+        new_points = new_points.permute(0, 3, 2, 1) # [B, C+D, nsample,npoint] 特征被视为2D Conv中的通道维
         for i, conv in enumerate(self.mlp_convs):
             bn = self.mlp_bns[i]
             new_points =  F.relu(bn(conv(new_points)))
 
-        new_points = torch.max(new_points, 2)[0]
+        new_points = torch.max(new_points, 2)[0] # PointNet中的最大池化
         new_xyz = new_xyz.permute(0, 2, 1)
         return new_xyz, new_points
 
@@ -283,6 +283,7 @@ class PointNetSetAbstractionMsg(nn.Module):
 
 
 class PointNetFeaturePropagation(nn.Module):
+    """特征传播模块"""
     def __init__(self, in_channel, mlp):
         super(PointNetFeaturePropagation, self).__init__()
         self.mlp_convs = nn.ModuleList()
@@ -303,6 +304,7 @@ class PointNetFeaturePropagation(nn.Module):
         Return:
             new_points: upsampled points data, [B, D', N]
         """
+        # (BatchSize, NumSamples, 3)
         xyz1 = xyz1.permute(0, 2, 1)
         xyz2 = xyz2.permute(0, 2, 1)
 
@@ -315,11 +317,11 @@ class PointNetFeaturePropagation(nn.Module):
         else:
             dists = square_distance(xyz1, xyz2)
             dists, idx = dists.sort(dim=-1)
-            dists, idx = dists[:, :, :3], idx[:, :, :3]  # [B, N, 3]
+            dists, idx = dists[:, :, :3], idx[:, :, :3]  # [B, N, 3] 取最近的三个点信息？
 
-            dist_recip = 1.0 / (dists + 1e-8)
+            dist_recip = 1.0 / (dists + 1e-8) # 可能会包含自己，欧式距离为0。因此，要加1e8防止零除
             norm = torch.sum(dist_recip, dim=2, keepdim=True)
-            weight = dist_recip / norm
+            weight = dist_recip / norm # 距离倒数做为插值的权重
             interpolated_points = torch.sum(index_points(points2, idx) * weight.view(B, N, 3, 1), dim=2)
 
         if points1 is not None:

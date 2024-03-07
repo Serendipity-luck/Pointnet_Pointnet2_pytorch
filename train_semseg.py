@@ -193,7 +193,7 @@ def main(args):
             points, target = points.float().cuda(), target.long().cuda()
             points = points.transpose(2, 1) # shape (batch_size, 9, num_points)
 
-            seg_pred, trans_feat = classifier(points) # trans_feat T-Net输出的特征变换矩阵 shape(batch_size, k, k)
+            seg_pred, trans_feat = classifier(points) # trans_feat 转换后特征
             seg_pred = seg_pred.contiguous().view(-1, NUM_CLASSES) # 展平统计
 
             batch_label = target.view(-1, 1)[:, 0].cpu().data.numpy()
