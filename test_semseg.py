@@ -58,7 +58,7 @@ def main(args):
 
     '''HYPER PARAMETER'''
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
-    experiment_dir = 'log/sem_seg/' + args.log_dir
+    experiment_dir = 'log/sem_seg_local/' + args.log_dir
     visual_dir = experiment_dir + '/visual/'
     visual_dir = Path(visual_dir)
     visual_dir.mkdir(exist_ok=True)
@@ -79,7 +79,7 @@ def main(args):
     BATCH_SIZE = args.batch_size
     NUM_POINT = args.num_point
 
-    root = 'data/s3dis/stanford_indoor3d/'
+    root = 'data/stanford_indoor3d/'
 
     TEST_DATASET_WHOLE_SCENE = ScannetDatasetWholeScene(root, split='test', test_area=args.test_area, block_points=NUM_POINT)
     log_string("The number of test data is: %d" % len(TEST_DATASET_WHOLE_SCENE))
@@ -155,7 +155,7 @@ def main(args):
                 total_correct_class[l] += total_correct_class_tmp[l]
                 total_iou_deno_class[l] += total_iou_deno_class_tmp[l]
 
-            iou_map = np.array(total_correct_class_tmp) / (np.array(total_iou_deno_class_tmp, dtype=np.float) + 1e-6)
+            iou_map = np.array(total_correct_class_tmp) / (np.array(total_iou_deno_class_tmp, dtype=np.float64) + 1e-6)
             print(iou_map)
             arr = np.array(total_seen_class_tmp)
             tmp_iou = np.mean(iou_map[arr != 0])
@@ -182,7 +182,7 @@ def main(args):
                 fout.close()
                 fout_gt.close()
 
-        IoU = np.array(total_correct_class) / (np.array(total_iou_deno_class, dtype=np.float) + 1e-6)
+        IoU = np.array(total_correct_class) / (np.array(total_iou_deno_class, dtype=np.float64) + 1e-6)
         iou_per_class_str = '------- IoU --------\n'
         for l in range(NUM_CLASSES):
             iou_per_class_str += 'class %s, IoU: %.3f \n' % (
@@ -191,7 +191,7 @@ def main(args):
         log_string(iou_per_class_str)
         log_string('eval point avg class IoU: %f' % np.mean(IoU))
         log_string('eval whole scene point avg class acc: %f' % (
-            np.mean(np.array(total_correct_class) / (np.array(total_seen_class, dtype=np.float) + 1e-6))))
+            np.mean(np.array(total_correct_class) / (np.array(total_seen_class, dtype=np.float64) + 1e-6))))
         log_string('eval whole scene point accuracy: %f' % (
                 np.sum(total_correct_class) / float(np.sum(total_seen_class) + 1e-6)))
 

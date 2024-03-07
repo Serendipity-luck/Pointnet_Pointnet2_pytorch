@@ -42,7 +42,7 @@ def square_distance(src, dst):
 
 def index_points(points, idx):
     """
-
+    从points中挑选所有被采样的点，组成new_points
     Input:
         points: input points data, [B, N, C]
         idx: sample index data, [B, S]
@@ -52,40 +52,45 @@ def index_points(points, idx):
     device = points.device
     B = points.shape[0]
     view_shape = list(idx.shape)
-    view_shape[1:] = [1] * (len(view_shape) - 1)
+    view_shape[1:] = [1] * (len(view_shape) - 1) # (BatchSize, 1)
     repeat_shape = list(idx.shape)
-    repeat_shape[0] = 1
-    batch_indices = torch.arange(B, dtype=torch.long).to(device).view(view_shape).repeat(repeat_shape)
+    repeat_shape[0] = 1 # (1, numSample)
+    batch_indices = torch.arange(B, dtype=torch.long).to(device).view(view_shape).repeat(repeat_shape) # (BatchSize, numSample)
     new_points = points[batch_indices, idx, :]
     return new_points
 
 
 def farthest_point_sample(xyz, npoint):
     """
+    FPS 最远点采样
     Input:
-        xyz: pointcloud data, [B, N, 3]
+        xyz: pointcloud data, [BatchSize, NumOfPoints, 3(xyz)]
         npoint: number of samples
     Return:
         centroids: sampled pointcloud index, [B, npoint]
     """
     device = xyz.device
     B, N, C = xyz.shape
-    centroids = torch.zeros(B, npoint, dtype=torch.long).to(device)
-    distance = torch.ones(B, N).to(device) * 1e10
-    farthest = torch.randint(0, N, (B,), dtype=torch.long).to(device)
-    batch_indices = torch.arange(B, dtype=torch.long).to(device)
+    centroids = torch.zeros(B, npoint, dtype=torch.long).to(device) # 质心集合
+    distance = torch.ones(B, N).to(device) * 1e10 # 每个点到当前已选中点集的最远点距离
+    farthest = torch.randint(0, N, (B,), dtype=torch.long).to(device) # 为每个批次选择一个起始质心索引
+    batch_indices = torch.arange(B, dtype=torch.long).to(device) # 批次索引，方便运算
     for i in range(npoint):
         centroids[:, i] = farthest
         centroid = xyz[batch_indices, farthest, :].view(B, 1, 3)
-        dist = torch.sum((xyz - centroid) ** 2, -1)
+        dist = torch.sum((xyz - centroid) ** 2, -1) # 计算当前选中点到所有点的距离
+        # 与新加入集合的新点做距离计算，若新点加入后，保存的最远距离大于新计算出的距离
+        # 则说明该点离集合的距离更近了
+        # 更新距离
         mask = dist < distance
         distance[mask] = dist[mask]
-        farthest = torch.max(distance, -1)[1]
+        farthest = torch.max(distance, -1)[1] # 更新最远点
     return centroids
 
 
 def query_ball_point(radius, nsample, xyz, new_xyz):
     """
+    Ball Query: 操作半径内所有点
     Input:
         radius: local region radius
         nsample: max sample number in local region
@@ -98,21 +103,21 @@ def query_ball_point(radius, nsample, xyz, new_xyz):
     B, N, C = xyz.shape
     _, S, _ = new_xyz.shape
     group_idx = torch.arange(N, dtype=torch.long).to(device).view(1, 1, N).repeat([B, S, 1])
-    sqrdists = square_distance(new_xyz, xyz)
-    group_idx[sqrdists > radius ** 2] = N
-    group_idx = group_idx.sort(dim=-1)[0][:, :, :nsample]
+    sqrdists = square_distance(new_xyz, xyz) # (BatchSize, NumCentroids, NumPoints)
+    group_idx[sqrdists > radius ** 2] = N # 对于距离超出半径的点，将其索引设置为N(这是一个不可能的索引点, 因为范围为0~N-1)
+    group_idx = group_idx.sort(dim=-1)[0][:, :, :nsample] # 取最近的nsample个点
     group_first = group_idx[:, :, 0].view(B, S, 1).repeat([1, 1, nsample])
-    mask = group_idx == N
-    group_idx[mask] = group_first[mask]
+    mask = group_idx == N # 若group_idx中有效查询点少于采样个数，则mask中对应元素为True
+    group_idx[mask] = group_first[mask] # 将这些无效查询点用组中第一个点代替
     return group_idx
 
 
 def sample_and_group(npoint, radius, nsample, xyz, points, returnfps=False):
     """
     Input:
-        npoint:
-        radius:
-        nsample:
+        npoint: 共有多少点
+        radius: 采样半径
+        nsample: 采样点数
         xyz: input points position data, [B, N, 3]
         points: input points data, [B, N, D]
     Return:
@@ -121,15 +126,15 @@ def sample_and_group(npoint, radius, nsample, xyz, points, returnfps=False):
     """
     B, N, C = xyz.shape
     S = npoint
-    fps_idx = farthest_point_sample(xyz, npoint) # [B, npoint, C]
-    new_xyz = index_points(xyz, fps_idx)
+    fps_idx = farthest_point_sample(xyz, npoint) # [B, npoint, C] 最远点采样后的索引
+    new_xyz = index_points(xyz, fps_idx) # (BatchSize, numSample, 3)
     idx = query_ball_point(radius, nsample, xyz, new_xyz)
     grouped_xyz = index_points(xyz, idx) # [B, npoint, nsample, C]
-    grouped_xyz_norm = grouped_xyz - new_xyz.view(B, S, 1, C)
+    grouped_xyz_norm = grouped_xyz - new_xyz.view(B, S, 1, C) # 将每组中的采样点坐标都改为与该组质心的相对坐标
 
     if points is not None:
         grouped_points = index_points(points, idx)
-        new_points = torch.cat([grouped_xyz_norm, grouped_points], dim=-1) # [B, npoint, nsample, C+D]
+        new_points = torch.cat([grouped_xyz_norm, grouped_points], dim=-1) # [B, npoint, nsample, C+D] 连结张量，获取更加丰富的特征信息
     else:
         new_points = grouped_xyz_norm
     if returnfps:
@@ -159,6 +164,9 @@ def sample_and_group_all(xyz, points):
 
 
 class PointNetSetAbstraction(nn.Module):
+    """
+    并没有获取多尺度特征
+    """
     def __init__(self, npoint, radius, nsample, in_channel, mlp, group_all):
         super(PointNetSetAbstraction, self).__init__()
         self.npoint = npoint
@@ -203,7 +211,19 @@ class PointNetSetAbstraction(nn.Module):
 
 
 class PointNetSetAbstractionMsg(nn.Module):
+    """
+    采用了MSG方式获取多尺度特征
+    """
     def __init__(self, npoint, radius_list, nsample_list, in_channel, mlp_list):
+        """
+        Input: 
+            npoint: 本层需要处理的点数量
+            radius_list: 采样半径列表
+            nsample_list: 每个尺度上采样邻近点的最大数量的列表
+            in_channel: 输入半径
+            mlp_list: 每个尺度上MLP输出通道。MLP用于编码特征
+        
+        """
         super(PointNetSetAbstractionMsg, self).__init__()
         self.npoint = npoint
         self.radius_list = radius_list
